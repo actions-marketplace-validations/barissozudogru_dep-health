@@ -18,10 +18,24 @@ const DOWNLOADS_BASE = "https://api.npmjs.org/downloads/point/last-week";
 const CONCURRENCY = 8;
 const REQUEST_TIMEOUT_MS = 15_000;
 
-function fetchJson<T>(url: string): Promise<T> {
+function fetchJson<T>(url: string, redirectCount = 0): Promise<T> {
   return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error(`TOO_MANY_REDIRECTS:${url}`));
+      return;
+    }
     const mod = url.startsWith("https://") ? https : http;
     const req = mod.get(url, { timeout: REQUEST_TIMEOUT_MS }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        const location = res.headers.location;
+        res.resume();
+        if (!location) {
+          reject(new Error(`REDIRECT_NO_LOCATION:${url}`));
+          return;
+        }
+        resolve(fetchJson<T>(location, redirectCount + 1));
+        return;
+      }
       if (res.statusCode === 404) {
         reject(new Error(`NOT_FOUND:${url}`));
         res.resume();
@@ -117,11 +131,10 @@ function computeScore(breakdown: Omit<ScoreBreakdown, "total">): ScoreBreakdown 
 
 async function fetchWeeklyDownloads(name: string): Promise<number> {
   try {
-    const encoded = name.startsWith("@")
-      ? "@" + encodeURIComponent(name.slice(1))
-      : encodeURIComponent(name);
+    // The npm downloads API accepts scoped packages as @scope/pkg without encoding the slash.
+    // Encoding the slash breaks the endpoint for scoped packages.
     const data = await fetchJson<DownloadsResponse>(
-      `${DOWNLOADS_BASE}/${encoded}`
+      `${DOWNLOADS_BASE}/${name}`
     );
     return data.downloads ?? 0;
   } catch {
@@ -199,15 +212,20 @@ async function analyzePackage(
 
 async function runConcurrent<T>(
   items: Array<() => Promise<T>>,
-  concurrency: number
+  concurrency: number,
+  onComplete?: (completed: number, total: number) => void
 ): Promise<T[]> {
   const results: T[] = [];
   let index = 0;
+  let completed = 0;
+  const total = items.length;
 
   async function worker(): Promise<void> {
     while (index < items.length) {
       const current = index++;
       results[current] = await items[current]();
+      completed++;
+      onComplete?.(completed, total);
     }
   }
 
@@ -218,7 +236,18 @@ async function runConcurrent<T>(
   return results;
 }
 
-export async function analyze(directory: string): Promise<AnalysisResult> {
+export interface AnalyzeOptions {
+  prodOnly?: boolean;
+  devOnly?: boolean;
+  onProgress?: (completed: number, total: number) => void;
+}
+
+export async function analyze(
+  directory: string,
+  options: AnalyzeOptions = {}
+): Promise<AnalysisResult> {
+  const { prodOnly = false, devOnly = false, onProgress } = options;
+
   const pkgPath = path.join(directory, "package.json");
   if (!fs.existsSync(pkgPath)) {
     throw new Error(`No package.json found at ${pkgPath}`);
@@ -227,14 +256,17 @@ export async function analyze(directory: string): Promise<AnalysisResult> {
   const raw = fs.readFileSync(pkgPath, "utf8");
   const pkg: PackageJson = JSON.parse(raw);
 
-  const deps: Array<[string, string, boolean]> = [
-    ...Object.entries(pkg.dependencies ?? {}).map(
-      ([n, v]) => [n, v, false] as [string, string, boolean]
-    ),
-    ...Object.entries(pkg.devDependencies ?? {}).map(
-      ([n, v]) => [n, v, true] as [string, string, boolean]
-    ),
-  ];
+  const deps: Array<[string, string, boolean]> = [];
+  if (!devOnly) {
+    for (const [n, v] of Object.entries(pkg.dependencies ?? {})) {
+      deps.push([n, v, false]);
+    }
+  }
+  if (!prodOnly) {
+    for (const [n, v] of Object.entries(pkg.devDependencies ?? {})) {
+      deps.push([n, v, true]);
+    }
+  }
 
   const tasks = deps.map(
     ([name, version, isDev]) =>
@@ -242,8 +274,8 @@ export async function analyze(directory: string): Promise<AnalysisResult> {
         analyzePackage(name, version, isDev)
   );
 
-  const raw_results = await runConcurrent(tasks, CONCURRENCY);
-  const results = raw_results.filter(
+  const rawResults = await runConcurrent(tasks, CONCURRENCY, onProgress);
+  const results = rawResults.filter(
     (r): r is DependencyHealth => r !== null
   );
 

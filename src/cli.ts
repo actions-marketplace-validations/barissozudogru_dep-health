@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { analyze } from "./index.js";
 import { DependencyHealth, AnalysisResult, HealthCategory } from "./types.js";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 
 // ── ANSI colors ──────────────────────────────────────────────────────────────
 const isTTY = process.stdout.isTTY;
@@ -20,12 +22,28 @@ const c = {
   bgGreen: isTTY ? "\x1b[42m" : "",
 };
 
+// ── Package version (read from package.json at runtime) ──────────────────────
+function getPackageVersion(): string {
+  try {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const pkgPath = path.resolve(__dirname, "..", "package.json");
+    const content = fs.readFileSync(pkgPath, "utf8");
+    const pkg = JSON.parse(content) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 // ── Argument parsing (no external deps) ─────────────────────────────────────
 interface CliArgs {
   targetDir: string;
   jsonMode: boolean;
   minScore: number | null;
   help: boolean;
+  version: boolean;
+  prodOnly: boolean;
+  devOnly: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -34,13 +52,22 @@ function parseArgs(argv: string[]): CliArgs {
   let jsonMode = false;
   let minScore: number | null = null;
   let help = false;
+  let version = false;
+  let prodOnly = false;
+  let devOnly = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--help" || arg === "-h") {
       help = true;
+    } else if (arg === "--version" || arg === "-v") {
+      version = true;
     } else if (arg === "--json") {
       jsonMode = true;
+    } else if (arg === "--prod-only") {
+      prodOnly = true;
+    } else if (arg === "--dev-only") {
+      devOnly = true;
     } else if (arg === "--path" || arg === "-p") {
       const next = args[++i];
       if (!next) {
@@ -68,7 +95,12 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  return { targetDir, jsonMode, minScore, help };
+  if (prodOnly && devOnly) {
+    console.error("--prod-only and --dev-only cannot be used together");
+    process.exit(1);
+  }
+
+  return { targetDir, jsonMode, minScore, help, version, prodOnly, devOnly };
 }
 
 function printHelp(): void {
@@ -82,13 +114,16 @@ OPTIONS
   --path <dir>       Directory containing package.json  (default: cwd)
   --json             Output results as JSON for CI pipelines
   --min-score <n>    Exit with code 1 if any dependency scores below <n>
+  --prod-only        Analyze only production dependencies
+  --dev-only         Analyze only dev dependencies
+  -v, --version      Print version and exit
   -h, --help         Show this help message
 
 SCORING (0-10, higher is better)
-  Freshness   30%   Major versions behind penalized (-3 each), minor (-1), patch (-0.5)
-  Recency     30%   Last publish date: <6 months=10, <1 year=7, <2 years=4, older=1
-  Security    20%   Deprecated packages score 0
-  Popularity  20%   Has TypeScript types +2, weekly downloads tiered score
+  Freshness     30%   Major versions behind penalized (-3 each), minor (-1), patch (-0.5)
+  Recency       30%   Last publish date: <6 months=10, <1 year=7, <2 years=4, older=1
+  Deprecation   20%   Deprecated packages score 0
+  Popularity    20%   Has TypeScript types +2, weekly downloads tiered score
 
 CATEGORIES
   CRITICAL    0-3   Immediate attention required
@@ -99,7 +134,9 @@ EXAMPLES
   dep-health
   dep-health --path ./my-project
   dep-health --json > report.json
-  dep-health --min-score 5   # CI gate: fail if any dep scores below 5
+  dep-health --min-score 5       # CI gate: fail if any dep scores below 5
+  dep-health --prod-only         # skip devDependencies
+  dep-health --dev-only          # skip dependencies
 `);
 }
 
@@ -253,13 +290,29 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (args.version) {
+    console.log(getPackageVersion());
+    process.exit(0);
+  }
+
   console.log(
     `${isTTY ? "\x1b[36m" : ""}Analyzing dependencies in ${args.targetDir}...${isTTY ? "\x1b[0m" : ""}`
   );
 
   let result: AnalysisResult;
   try {
-    result = await analyze(args.targetDir);
+    result = await analyze(args.targetDir, {
+      prodOnly: args.prodOnly,
+      devOnly: args.devOnly,
+      onProgress: (completed, total) => {
+        process.stderr.write(
+          `\rAnalyzing ${completed}/${total} dependencies...`
+        );
+        if (completed === total) {
+          process.stderr.write("\n");
+        }
+      },
+    });
   } catch (err) {
     console.error(
       `Error: ${err instanceof Error ? err.message : String(err)}`
