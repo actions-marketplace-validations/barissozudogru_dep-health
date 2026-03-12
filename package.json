@@ -1,0 +1,44 @@
+{
+  "name": "@barissozudogru/dep-health",
+  "version": "0.1.0",
+  "description": "Health score for npm dependencies combining freshness, security, and maintenance",
+  "bin": {
+    "dep-health": "./dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/barissozudogru/dep-health.git"
+  },
+  "keywords": [
+    "npm",
+    "dependencies",
+    "health",
+    "audit",
+    "maintenance",
+    "cli"
+  ],
+  "author": "Baris Sozudogru",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "typescript": "^5.9.3"
+  }
+}
