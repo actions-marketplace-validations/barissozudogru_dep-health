@@ -58,6 +58,8 @@ Exit code is `1` if any dependency scores below the threshold, `0` otherwise.
 --path <dir>       Directory containing package.json (default: cwd)
 --json             Output results as JSON
 --min-score <n>    Exit 1 if any dep scores below n (CI gate)
+--prod-only        Analyze only production dependencies (skip devDependencies)
+--dev-only         Analyze only dev dependencies (skip dependencies)
 -h, --help         Show help
 ```
 

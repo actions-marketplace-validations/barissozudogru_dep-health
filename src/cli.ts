@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 
 // ── ANSI colors ──────────────────────────────────────────────────────────────
-const isTTY = process.stdout.isTTY;
+const isTTY = process.stdout.isTTY === true;
 const c = {
   reset: isTTY ? "\x1b[0m" : "",
   bold: isTTY ? "\x1b[1m" : "",
@@ -305,11 +305,18 @@ async function main(): Promise<void> {
       prodOnly: args.prodOnly,
       devOnly: args.devOnly,
       onProgress: (completed, total) => {
-        process.stderr.write(
-          `\rAnalyzing ${completed}/${total} dependencies...`
-        );
-        if (completed === total) {
-          process.stderr.write("\n");
+        const isStderrTTY = process.stderr.isTTY === true;
+        if (isStderrTTY) {
+          process.stderr.write(
+            `\rAnalyzing ${completed}/${total} dependencies...`
+          );
+          if (completed === total) {
+            process.stderr.write("\n");
+          }
+        } else {
+          if (completed === total) {
+            process.stderr.write(`Analyzed ${total} dependencies.\n`);
+          }
         }
       },
     });
