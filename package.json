@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Health score for npm dependencies combining freshness, security, and maintenance",
   "bin": {
-    "dep-health": "./dist/cli.js"
+    "dep-health": "dist/cli.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
