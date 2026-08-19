@@ -1,6 +1,6 @@
 {
   "name": "@barissozudogru/dep-health",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Health score for npm dependencies combining freshness, security, and maintenance",
   "bin": {
     "dep-health": "dist/cli.js"
@@ -19,7 +19,7 @@
     "README.md"
   ],
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "repository": {
     "type": "git",

@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.4.0] - 2026-08-19
+
+### Fixed
+- Download counts are fetched in one batched request per 100 packages, keeping a run under the registry rate limit.
+- An unavailable download count is recorded as unknown rather than zero, and its weight is renormalised out of the score.
+- Registry failures other than 404 stop the run instead of silently dropping the dependency.
+
+### Added
+- Retry with backoff for 429 and 5xx responses.
+- Test suite.
+
 ## [0.3.0] - 2025-03-12
 
 ### Added
