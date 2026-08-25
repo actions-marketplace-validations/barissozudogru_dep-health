@@ -1,7 +1,7 @@
 {
   "name": "@barissozudogru/dep-health",
-  "version": "0.4.0",
-  "description": "Health score for npm dependencies combining freshness, security, and maintenance",
+  "version": "0.5.0",
+  "description": "Score npm dependency health using freshness, recency, deprecation, and adoption signals",
   "bin": {
     "dep-health": "dist/cli.js"
   },
@@ -26,12 +26,18 @@
     "type": "git",
     "url": "https://github.com/barissozudogru/dep-health.git"
   },
+  "homepage": "https://petri-labs.org/tools/dep-health/",
+  "bugs": {
+    "url": "https://github.com/barissozudogru/dep-health/issues"
+  },
   "keywords": [
     "npm",
     "dependencies",
     "health",
-    "audit",
     "maintenance",
+    "package-health",
+    "dependency-management",
+    "ci",
     "cli"
   ],
   "author": "Baris Sozudogru",

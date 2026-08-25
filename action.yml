@@ -1,0 +1,71 @@
+name: Dependency health gate
+description: Score npm dependency maintenance signals and enforce a minimum score.
+author: Petri Labs
+
+branding:
+  icon: package
+  color: purple
+
+inputs:
+  path:
+    description: Directory containing package.json.
+    required: false
+    default: .
+  min-score:
+    description: Fail when any dependency scores below this value.
+    required: false
+    default: "4"
+  dependency-set:
+    description: all, production, or development.
+    required: false
+    default: all
+
+outputs:
+  report:
+    description: The dependency health report.
+    value: ${{ steps.check.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      name: Check dependency health
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_MIN_SCORE: ${{ inputs.min-score }}
+        INPUT_DEPENDENCY_SET: ${{ inputs.dependency-set }}
+      run: |
+        package_version="$(node -p "require('$GITHUB_ACTION_PATH/package.json').version")"
+        command=(npx --yes "@barissozudogru/dep-health@${package_version}" --path "$INPUT_PATH" --min-score "$INPUT_MIN_SCORE")
+        if [ "$INPUT_DEPENDENCY_SET" = "production" ]; then
+          command+=(--prod-only)
+        elif [ "$INPUT_DEPENDENCY_SET" = "development" ]; then
+          command+=(--dev-only)
+        elif [ "$INPUT_DEPENDENCY_SET" != "all" ]; then
+          echo "dependency-set must be all, production, or development" >&2
+          exit 1
+        fi
+
+        set +e
+        report="$("${command[@]}" 2>&1)"
+        status=$?
+        set -e
+
+        delimiter="DEP_HEALTH_REPORT_$(date +%s%N)"
+        {
+          echo "report<<${delimiter}"
+          printf '%s\n' "$report"
+          echo "${delimiter}"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## Dependency health gate"
+          echo
+          echo '~~~text'
+          printf '%s\n' "$report"
+          echo '~~~'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        printf '%s\n' "$report"
+        exit "$status"

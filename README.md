@@ -1,6 +1,21 @@
+<p align="center">
+  <img src="./assets/social-preview.svg" alt="dep-health" width="900" />
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@barissozudogru/dep-health"><img alt="npm version" src="https://img.shields.io/npm/v/@barissozudogru/dep-health?style=flat-square&color=8D88E8"></a>
+  <a href="https://www.npmjs.com/package/@barissozudogru/dep-health"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@barissozudogru/dep-health?style=flat-square&color=8D88E8"></a>
+  <a href="https://github.com/barissozudogru/dep-health/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/barissozudogru/dep-health/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="./LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/License-MIT-8D88E8?style=flat-square"></a>
+</p>
+
 # dep-health
 
 Health score for every npm dependency in a project. Queries the npm registry for each dependency in `package.json` and calculates a score from 0 to 10 based on version freshness, publish recency, deprecation status, and popularity. Zero runtime dependencies.
+
+This is a maintenance review aid, not a vulnerability or CVE scanner. A low score is a prompt to investigate, not an automatic removal decision.
+
+[Tool page](https://petri-labs.org/tools/dep-health/) · [npm](https://www.npmjs.com/package/@barissozudogru/dep-health) · [Source](https://github.com/barissozudogru/dep-health)
 
 ```bash
 npx @barissozudogru/dep-health
@@ -62,45 +77,50 @@ Download tiers (popularity sub-score):
 | >= 100 | +1 |
 | < 100 | 0 |
 
-## Example Output
+## Verified output
 
+The current release was run against this repository's real `package.json` on 2026-08-26:
+
+```text
+HEALTHY (2)
+
+  @types/node  [dev] [TS]
+  7.0/10
+  freshness:0.0  recency:10.0  deprecation:10.0  popularity:10.0
+
+  typescript  [dev]
+  7.8/10
+  freshness:4.0  recency:10.0  deprecation:10.0  popularity:n/a
+
+Overall project score: 7.4 / 10 (HEALTHY)
+2 packages analyzed
 ```
-dep-health  v0.3.0 of my-app  2026-03-12T10:00:00.000Z
-────────────────────────────────────────────────────────────────────────
 
-  CRITICAL (2)
+Registry data changes over time, so repeated runs can legitimately differ. Unknown download data is excluded from the weighted score instead of being treated as zero.
 
-    moment  [prod]
-    ████░░░░░░ 4.0 -> 2.29.4   2.29.4 is latest
-    3 major behind  |  last publish: 14mo ago  |  1.2M/wk
-    freshness:1.0  recency:4.0  deprecation:0.0  popularity:10.0
-    note: Moment is a legacy project...
-
-    request  [prod] [DEPRECATED]
-    ██░░░░░░░░ 2.0 -> 2.88.2
-    up to date  |  last publish: 4y ago  |  8.1M/wk
-    freshness:10.0  recency:1.0  deprecation:0.0  popularity:10.0
-
-  WARNING (1)
-
-    lodash  [dev]
-    ██████░░░░ 6.0 -> 4.17.21
-    1 minor behind  |  last publish: 22mo ago  |  45.2M/wk
-    freshness:9.0  recency:4.0  deprecation:10.0  popularity:10.0
-
-  HEALTHY (3)
-
-    typescript  [dev] [TS]
-    ██████████ 9.8 -> 5.4.5
-    up to date  |  last publish: 2mo ago  |  62.0M/wk
-    freshness:10.0  recency:10.0  deprecation:10.0  popularity:10.0
-
-────────────────────────────────────────────────────────────────────────
-  Overall project score:  6.2 / 10  (WARNING)
-  6 packages analyzed  |  2 critical  |  1 warning  |  3 healthy
-```
+If this saves you time, consider [starring the repository](https://github.com/barissozudogru/dep-health). It helps other developers find it.
 
 ## CI Integration
+
+Use the reusable action to write the evidence to the workflow summary and enforce a threshold:
+
+```yaml
+name: Dependency health
+
+on: [pull_request]
+
+jobs:
+  dep-health:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: barissozudogru/dep-health@v0.5.0
+        with:
+          path: .
+          min-score: "4"
+```
 
 Add a step to your CI pipeline to enforce a minimum health score:
 

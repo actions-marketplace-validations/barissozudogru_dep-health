@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## [0.5.0] - 2026-08-26
+
+### Added
+
+- Reusable GitHub Action that writes the full score evidence to the workflow summary and enforces a minimum score.
+- Continuous integration, Petri Labs discovery metadata, download badges, and a repository social preview.
+
+### Changed
+
+- Documentation now separates maintenance signals from vulnerability analysis more explicitly.
+- The package homepage now points to the focused Petri Labs tool page while source and issues remain on GitHub.
+
 ## [0.4.0] - 2026-08-19
 
 ### Fixed
