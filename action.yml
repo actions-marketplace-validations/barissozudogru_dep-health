@@ -37,7 +37,7 @@ runs:
         INPUT_DEPENDENCY_SET: ${{ inputs.dependency-set }}
       run: |
         package_version="$(node -p "require('$GITHUB_ACTION_PATH/package.json').version")"
-        command=(npx --yes "@barissozudogru/dep-health@${package_version}" --path "$INPUT_PATH" --min-score "$INPUT_MIN_SCORE")
+        command=(npm exec --yes --package="@barissozudogru/dep-health@${package_version}" -- dep-health --path "$INPUT_PATH" --min-score "$INPUT_MIN_SCORE")
         if [ "$INPUT_DEPENDENCY_SET" = "production" ]; then
           command+=(--prod-only)
         elif [ "$INPUT_DEPENDENCY_SET" = "development" ]; then

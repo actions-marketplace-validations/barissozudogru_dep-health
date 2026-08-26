@@ -116,7 +116,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: barissozudogru/dep-health@v0.5.0
+      - uses: barissozudogru/dep-health@v0.5.1
         with:
           path: .
           min-score: "4"

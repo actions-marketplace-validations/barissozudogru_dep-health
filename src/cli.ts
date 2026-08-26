@@ -137,6 +137,9 @@ EXAMPLES
   dep-health --min-score 5       # CI gate: fail if any dep scores below 5
   dep-health --prod-only         # skip devDependencies
   dep-health --dev-only          # skip dependencies
+
+SOURCE AND DOCUMENTATION
+  https://github.com/barissozudogru/dep-health
 `);
 }
 
