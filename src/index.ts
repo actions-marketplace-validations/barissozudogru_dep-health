@@ -18,6 +18,10 @@ const DOWNLOADS_BASE = "https://api.npmjs.org/downloads/point/last-week";
 const CONCURRENCY = 8;
 const REQUEST_TIMEOUT_MS = 15_000;
 
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 function fetchJson<T>(url: string, redirectCount = 0): Promise<T> {
   return new Promise((resolve, reject) => {
     if (redirectCount > 5) {
@@ -41,7 +45,7 @@ function fetchJson<T>(url: string, redirectCount = 0): Promise<T> {
         res.resume();
         return;
       }
-      if (res.statusCode === 429 || (res.statusCode ?? 0) >= 500) {
+      if (isRetryableStatus(res.statusCode ?? 0)) {
         const retryAfter = Number(res.headers["retry-after"]);
         res.resume();
         reject(
@@ -98,6 +102,47 @@ function computeVersionDelta(installed: string, latest: string): VersionDelta {
   if (lMaj === iMaj && lMin > iMin) return { major: 0, minor: lMin - iMin, patch: 0 };
   if (lMaj === iMaj && lMin === iMin && lPat > iPat) return { major: 0, minor: 0, patch: lPat - iPat };
   return { major: 0, minor: 0, patch: 0 };
+}
+
+function compareVersionTriples(
+  a: [number, number, number],
+  b: [number, number, number]
+): number {
+  if (a[0] !== b[0]) return a[0] - b[0];
+  if (a[1] !== b[1]) return a[1] - b[1];
+  return a[2] - b[2];
+}
+
+/**
+ * The version the installed one is compared against, and the one whose data
+ * decides deprecation and publish time.
+ *
+ * Fully unpublished or security-held packages can serve a packument with no
+ * latest dist-tag. The old fallback to "0.0.0" then matched no published
+ * version, so those packages read as not deprecated and zero versions behind
+ * and scored perfectly on both signals: the least maintainable packages got
+ * the best scores. The highest published version carries the same meaning
+ * when the tag is gone. A release also outranks a prerelease of the same
+ * version, which is how semver and the registry's own latest tag treat them.
+ */
+function resolveLatestVersion(registry: RegistryPackage): string | null {
+  const tagged = registry["dist-tags"]?.latest;
+  if (tagged) return tagged;
+
+  let latest: string | null = null;
+  let latestTriple: [number, number, number] | null = null;
+  for (const version of Object.keys(registry.versions ?? {})) {
+    const triple = parseVersion(version);
+    if (!triple) continue;
+    const cmp = latestTriple ? compareVersionTriples(triple, latestTriple) : 1;
+    const sameVersionRelease =
+      cmp === 0 && latest !== null && latest.includes("-") && !version.includes("-");
+    if (cmp > 0 || sameVersionRelease) {
+      latest = version;
+      latestTriple = triple;
+    }
+  }
+  return latest;
 }
 
 function scoreFreshness(delta: VersionDelta): number {
@@ -205,6 +250,40 @@ async function fetchJsonWithRetry<T>(url: string, attempts = 4): Promise<T> {
  */
 const BULK_BATCH_SIZE = 100;
 
+function isSinglePackageResponse(
+  data: DownloadsResponse | Record<string, DownloadsResponse | null>
+): data is DownloadsResponse {
+  // In the keyed bulk shape a "downloads" key would hold a package entry,
+  // never a number, so a numeric downloads field identifies the bare object.
+  return typeof data.downloads === "number";
+}
+
+/**
+ * Reads one bulk downloads response into per-name counts.
+ *
+ * A batch of several names answers with a map keyed by package name, but a
+ * batch of one resolves to the single-package endpoint, which answers with a
+ * bare downloads object. Reading that shape as a keyed map made data[name]
+ * undefined, so the count was recorded as unknown and the popularity signal
+ * was dropped. That hit every project with a single unscoped dependency, plus
+ * the trailing dependency of larger projects after 100-size slicing. Both
+ * shapes are accepted here so the batch size cannot decide whether a count
+ * survives.
+ */
+function parseDownloadsBatch(
+  data: DownloadsResponse | Record<string, DownloadsResponse | null>,
+  batch: string[]
+): Map<string, number | null> {
+  const keyed: Record<string, DownloadsResponse | null> =
+    isSinglePackageResponse(data) ? { [batch[0]]: data } : data;
+  const counts = new Map<string, number | null>();
+  for (const name of batch) {
+    const entry = keyed[name];
+    counts.set(name, entry ? entry.downloads ?? null : null);
+  }
+  return counts;
+}
+
 async function fetchWeeklyDownloadsMap(
   names: string[]
 ): Promise<Map<string, number | null>> {
@@ -216,11 +295,10 @@ async function fetchWeeklyDownloadsMap(
     const batch = plain.slice(i, i + BULK_BATCH_SIZE);
     try {
       const data = await fetchJsonWithRetry<
-        Record<string, DownloadsResponse | null>
+        DownloadsResponse | Record<string, DownloadsResponse | null>
       >(`${DOWNLOADS_BASE}/${batch.join(",")}`);
-      for (const name of batch) {
-        const entry = data[name];
-        result.set(name, entry ? entry.downloads ?? null : null);
+      for (const [name, count] of parseDownloadsBatch(data, batch)) {
+        result.set(name, count);
       }
     } catch {
       // Unknown, not zero.
@@ -247,6 +325,10 @@ function stripVersionRange(version: string): string {
   return version.replace(/^[\^~>=<*]+/, "").split(" ")[0];
 }
 
+function isNotFound(message: string): boolean {
+  return message.startsWith("NOT_FOUND");
+}
+
 async function analyzePackage(
   name: string,
   installedRange: string,
@@ -269,7 +351,7 @@ async function analyzePackage(
 
     // A 404 means the package is not on the public registry: a local path, a
     // git dependency, or a private package. That is expected, so it is skipped.
-    if (message.startsWith("NOT_FOUND")) {
+    if (isNotFound(message)) {
       return null;
     }
 
@@ -282,7 +364,16 @@ async function analyzePackage(
     );
   }
 
-  const latestVersion = registry["dist-tags"]?.latest ?? "0.0.0";
+  const latestVersion = resolveLatestVersion(registry);
+  if (!latestVersion) {
+    // No dist-tag and no published version leaves nothing to compare against
+    // or read metadata from. Any score would be invented, and skipping the
+    // dependency would report coverage the run does not have.
+    throw new Error(
+      `Registry data for "${name}" has no dist-tags and no published versions. ` +
+        `Its health cannot be scored, so the run is stopped.`
+    );
+  }
   const installedVersion = stripVersionRange(installedRange);
 
   // Last publish time from the registry time object
@@ -402,9 +493,23 @@ export async function analyze(
     (r): r is DependencyHealth => r !== null
   );
 
+  // analyzePackage drops a dependency only on the registry 404 path, so the
+  // declared names missing from the results are exactly the ones that are not
+  // on the public registry. Reporting them keeps the coverage of the score
+  // visible instead of narrowing it silently.
+  const scoredNames = new Set(results.map((r) => r.name));
+  const skippedDependencies = deps
+    .filter(([name]) => !scoredNames.has(name))
+    .map(([name]) => name);
+
   // Sort ascending - worst first
   results.sort((a, b) => a.score - b.score);
 
+  // An empty analysis is evidence for no score at all. The fallback stays a
+  // number so the JSON schema keeps its shape for API consumers; the CLI
+  // refuses to present it as a healthy verdict and fails a --min-score gate
+  // when the emptiness comes from skipped dependencies rather than from a
+  // package.json that declares none.
   const overallScore =
     results.length > 0
       ? Math.round(
@@ -424,21 +529,22 @@ export async function analyze(
     packageVersion: pkg.version ?? "0.0.0",
     analyzedAt: new Date(),
     dependencies: results,
+    skippedDependencies,
     overallScore,
     summary,
   };
 }
 
-/** A 404 means the package is not on the public registry, which is expected. */
-export function isNotFoundForTest(message: string): boolean {
-  return message.startsWith("NOT_FOUND");
-}
-
-/** Transient statuses are retried rather than failing the run outright. */
-export function isRetryableStatusForTest(status: number): boolean {
-  return status === 429 || status >= 500;
-}
+// Exported for tests: 404 detection and transient retryable HTTP status checks.
+export const isNotFoundForTest = isNotFound;
+export const isRetryableStatusForTest = isRetryableStatus;
 
 // Exported for tests: the scoring rules are where the rate-limit bug surfaced.
 export const computeScoreForTest = computeScore;
 export const scorePopularityForTest = scorePopularity;
+// Exported for tests: the batch parser is where the single-package shape bug surfaced.
+export const parseDownloadsBatchForTest = parseDownloadsBatch;
+// Exported for tests: the version fallback is where the missing dist-tag bug surfaced.
+export const resolveLatestVersionForTest = resolveLatestVersion;
+// Exported for tests: the retry loop handles transient registry and rate-limit errors.
+export const fetchJsonWithRetryForTest = fetchJsonWithRetry;

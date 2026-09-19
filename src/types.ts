@@ -8,12 +8,13 @@ export interface PackageJson {
 
 export interface RegistryPackage {
   name: string;
-  "dist-tags": {
-    latest: string;
-    [tag: string]: string;
+  /** Absent from packuments of fully unpublished or security-held packages. */
+  "dist-tags"?: {
+    latest?: string;
+    [tag: string]: string | undefined;
   };
   time: Record<string, string>;
-  versions: Record<string, VersionData>;
+  versions?: Record<string, VersionData>;
   description?: string;
 }
 
@@ -68,6 +69,11 @@ export interface AnalysisResult {
   packageVersion: string;
   analyzedAt: Date;
   dependencies: DependencyHealth[];
+  /**
+   * Declared dependencies that are not on the public registry (git, file, or
+   * private packages) and were therefore not scored.
+   */
+  skippedDependencies: string[];
   overallScore: number;
   summary: {
     critical: number;
